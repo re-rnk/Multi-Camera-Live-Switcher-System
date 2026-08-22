@@ -192,6 +192,7 @@
       <option value="2">カメラ 2</option>
       <option value="3">カメラ 3</option>
       <option value="4">カメラ 4</option>
+      <option value="5">カメラ 5</option>
     </select>
     <button class="btn" id="btn-start-camera">カメラ起動・配信開始</button>
     <div class="status-text" id="sender-status"></div>
@@ -219,8 +220,7 @@
   </div>
 
   <script>
-    // 互換性担保のためのPrefix
-    const SYSTEM_PREFIX = "mcls-v4-";
+    const SYSTEM_PREFIX = "mcls-v5-";
 
     const screens = {
       select: document.getElementById('mode-select'),
@@ -283,7 +283,7 @@
     });
 
     /* ===================================================
-       送信機（スマホ）側処理：送信機固定ID型
+       送信機（スマホ）側処理
     =================================================== */
     let localStream = null;
     let senderPeer = null;
@@ -300,7 +300,6 @@
         });
         document.getElementById('sender-video').srcObject = localStream;
 
-        // カメラ番号に応じた固定IDを作成（例: mcls-v4-cam-1）
         const myPeerId = SYSTEM_PREFIX + "cam-" + selectedNo;
         if (senderPeer) senderPeer.destroy();
 
@@ -310,10 +309,10 @@
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機の接続を待っています)`;
         });
 
-        // 受信機からのコールを待ち受けてストリームを返す
+        // 受信機からの着信要求にカメラストリームを返答
         senderPeer.on('call', (call) => {
           call.answer(localStream);
-          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ接続完了)`;
+          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
         });
 
         senderPeer.on('error', (err) => {
@@ -343,23 +342,38 @@
     }
 
     /* ===================================================
-       受信機（PC）側処理：ポーリング自動検出型
+       受信機（PC）側処理（5台対応＆ダミーストリーム接続）
     =================================================== */
     let receiverPeer = null;
     let currentCam = 1;
     const cameraStreams = {};
-    const activeCalls = {};
+    const connectingSet = new Set();
     let pollingTimer = null;
     const menuOverlay = document.getElementById('menu-overlay');
+
+    // 通信確立用のダミーストリーム生成関数
+    function createDummyStream() {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const dst = ctx.createMediaStreamDestination();
+      osc.connect(dst);
+      osc.start();
+      const audioTrack = dst.stream.getAudioTracks()[0];
+      audioTrack.enabled = false; // 消音状態
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 16; canvas.height = 16;
+      const canvasStream = canvas.captureStream();
+      
+      return new MediaStream([canvasStream.getVideoTracks()[0], audioTrack]);
+    }
 
     function initReceiver() {
       if (receiverPeer) receiverPeer.destroy();
       
-      // ランダムIDで起動
       receiverPeer = new Peer();
 
       receiverPeer.on('open', () => {
-        // 定期的に全カメラ（1〜4）へ接続を試みる（ループ処理）
         startPollingCameras();
       });
     }
@@ -367,29 +381,31 @@
     function startPollingCameras() {
       if (pollingTimer) clearInterval(pollingTimer);
       
-      // 2秒ごとに接続未完了のカメラへ再アプローチ
+      // 1.5秒周期で 1〜5番のカメラへ接続チェック
       pollingTimer = setInterval(() => {
-        [1, 2, 3, 4].forEach(num => {
-          if (!cameraStreams[num]) {
-            connectToCam(num);
+        for (let i = 1; i <= 5; i++) {
+          if (!cameraStreams[i] && !connectingSet.has(i)) {
+            connectToCam(i);
           }
-        });
-      }, 2000);
+        }
+      }, 1500);
     }
 
     function connectToCam(num) {
       const targetId = SYSTEM_PREFIX + "cam-" + num;
+      connectingSet.add(num);
 
-      // 受信機側からダミーキャンバスストリームを発信
-      const canvas = document.createElement('canvas');
-      canvas.width = 16; canvas.height = 16;
-      const dummyStream = canvas.captureStream();
-
+      const dummyStream = createDummyStream();
       const call = receiverPeer.call(targetId, dummyStream);
-      if (!call) return;
+
+      if (!call) {
+        connectingSet.delete(num);
+        return;
+      }
 
       call.on('stream', (remoteStream) => {
         cameraStreams[num] = remoteStream;
+        connectingSet.delete(num);
         if (num === currentCam) {
           switchCamera(num);
         }
@@ -398,15 +414,22 @@
 
       call.on('close', () => {
         delete cameraStreams[num];
+        connectingSet.delete(num);
         if (num === currentCam) switchCamera(num);
         updateGridView();
       });
 
       call.on('error', () => {
         delete cameraStreams[num];
+        connectingSet.delete(num);
       });
 
-      activeCalls[num] = call;
+      // タイムアウト保護（3秒経ってもストリームが届かなければクリア）
+      setTimeout(() => {
+        if (connectingSet.has(num) && !cameraStreams[num]) {
+          connectingSet.delete(num);
+        }
+      }, 3000);
     }
 
     function switchCamera(num) {
@@ -430,12 +453,14 @@
         receiverPeer = null;
       }
       Object.keys(cameraStreams).forEach(key => delete cameraStreams[key]);
+      connectingSet.clear();
     }
 
     window.addEventListener('keydown', (e) => {
       if (!screens.receiver.classList.contains('active')) return;
 
-      if (e.key >= '1' && e.key <= '4') {
+      // キーボードの 1〜5 キーに対応
+      if (e.key >= '1' && e.key <= '5') {
         switchCamera(parseInt(e.key, 10));
       }
 
@@ -452,7 +477,8 @@
       const container = document.getElementById('grid-container');
       container.innerHTML = '';
 
-      for (let i = 1; i <= 4; i++) {
+      // 1〜5番カメラのグリッドを動的生成
+      for (let i = 1; i <= 5; i++) {
         const item = document.createElement('div');
         item.className = `grid-item ${i === currentCam ? 'active-cam' : ''}`;
         
