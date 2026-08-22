@@ -141,10 +141,10 @@
       align-items: center;
     }
 
-    /* 上3つ・下3つの6画面グリッド */
+    /* 上2つ・下2つの4画面グリッド */
     .grid-view {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       grid-template-rows: repeat(2, 1fr);
       gap: 12px;
       flex: 1;
@@ -194,8 +194,6 @@
       <option value="2">カメラ 2</option>
       <option value="3">カメラ 3</option>
       <option value="4">カメラ 4</option>
-      <option value="5">カメラ 5</option>
-      <option value="6">カメラ 6</option>
     </select>
     <button class="btn" id="btn-start-camera">カメラ起動・配信開始</button>
     <div class="status-text" id="sender-status"></div>
@@ -224,7 +222,7 @@
 
   <script>
     const SYSTEM_PREFIX = "mcls-v6-";
-    const MAX_CAMERAS = 6;
+    const MAX_CAMERAS = 4;
 
     const screens = {
       select: document.getElementById('mode-select'),
