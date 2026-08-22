@@ -132,44 +132,31 @@
       z-index: 100;
       display: none;
       flex-direction: column;
-      padding: 16px;
-      gap: 12px;
-      overflow: hidden; /* スクロールバーを防止 */
+      padding: 20px;
+      gap: 16px;
     }
     .menu-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      height: 40px;
-      flex-shrink: 0;
     }
 
-    /* 16:9比率を保ちつつ画面内に完全収める2×2レイアウト */
+    /* 上2つ・下2つの4画面グリッド（画面全体フィット） */
     .grid-view {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-rows: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, 1fr);
       gap: 12px;
-      width: 100%;
-      height: calc(100vh - 84px);
-      align-items: center;
-      justify-items: center;
+      flex: 1;
+      height: calc(100vh - 100px);
     }
     .grid-item {
       position: relative;
       background: #18181b;
-      border-radius: 8px;
+      border-radius: 6px;
       overflow: hidden;
-      border: 3px solid transparent;
+      border: 2px solid transparent;
       cursor: pointer;
-      aspect-ratio: 16 / 9;
-      width: 100%;
-      height: 100%;
-      max-width: calc((100vh - 84px - 12px) / 2 * (16 / 9));
-      max-height: calc((100vw - 32px - 12px) / 2 * (9 / 16));
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
     .grid-item.active-cam {
       border-color: #3b82f6;
@@ -187,7 +174,6 @@
       padding: 4px 8px;
       font-size: 12px;
       border-radius: 4px;
-      z-index: 2;
     }
   </style>
 </head>
