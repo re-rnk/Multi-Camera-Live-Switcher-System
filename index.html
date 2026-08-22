@@ -134,6 +134,7 @@
       flex-direction: column;
       padding: 20px;
       gap: 16px;
+      overflow-y: auto;
     }
     .menu-header {
       display: flex;
@@ -141,22 +142,29 @@
       align-items: center;
     }
 
-    /* 上2つ・下2つの4画面グリッド */
+    /* 16:9比率に固定された2×2レイアウト */
     .grid-view {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      grid-template-rows: repeat(2, 1fr);
-      gap: 12px;
+      gap: 16px;
+      width: 100%;
+      max-width: 1280px;
+      margin: 0 auto;
+      align-content: center;
       flex: 1;
-      height: calc(100vh - 100px);
     }
     .grid-item {
       position: relative;
       background: #18181b;
-      border-radius: 6px;
+      border-radius: 8px;
       overflow: hidden;
-      border: 2px solid transparent;
+      border: 3px solid transparent;
       cursor: pointer;
+      aspect-ratio: 16 / 9; /* 画面比率を16:9に厳密に固定 */
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .grid-item.active-cam {
       border-color: #3b82f6;
@@ -174,6 +182,7 @@
       padding: 4px 8px;
       font-size: 12px;
       border-radius: 4px;
+      z-index: 2;
     }
   </style>
 </head>
@@ -284,6 +293,20 @@
       }
     });
 
+    /* ビットレート（通信量）制限処理：パケット詰まりによる途切れを防止 */
+    function applyBitrateLimit(peerConnection) {
+      if (!peerConnection || !peerConnection.getSenders) return;
+      peerConnection.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'video') {
+          const parameters = sender.getParameters();
+          if (!parameters.encodings) parameters.encodings = [{}];
+          // 2.5Mbps (2500000 bps) でキャッピング
+          parameters.encodings[0].maxBitrate = 2500000;
+          sender.setParameters(parameters).catch(e => console.warn("Bitrate set error:", e));
+        }
+      });
+    }
+
     /* ===================================================
        送信機（スマホ）側処理
     =================================================== */
@@ -297,7 +320,12 @@
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { 
+            facingMode: "environment", 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 },
+            frameRate: { max: 30 }
+          },
           audio: false
         });
         document.getElementById('sender-video').srcObject = localStream;
@@ -314,6 +342,11 @@
         senderPeer.on('call', (call) => {
           call.answer(localStream);
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
+          
+          // 接続確立時にビットレート設定を適用
+          if (call.peerConnection) {
+            applyBitrateLimit(call.peerConnection);
+          }
         });
 
         senderPeer.on('error', (err) => {
@@ -374,13 +407,14 @@
     function startPollingCameras() {
       if (pollingTimer) clearInterval(pollingTimer);
       
+      // 3秒間隔で接続状態を監視
       pollingTimer = setInterval(() => {
         for (let i = 1; i <= MAX_CAMERAS; i++) {
           if (!cameraStreams[i] && !isConnecting[i]) {
             connectToCamChannel(i);
           }
         }
-      }, 2000);
+      }, 3000);
     }
 
     function connectToCamChannel(num) {
@@ -423,7 +457,7 @@
         if (isConnecting[num] && !cameraStreams[num]) {
           isConnecting[num] = false;
         }
-      }, 3000);
+      }, 4000);
     }
 
     function switchCamera(num) {
