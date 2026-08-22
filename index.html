@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Multi-Camera-Live-Switcher-System</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
@@ -25,27 +25,6 @@
     }
     .active { display: flex; }
 
-    /* パスワード認証画面 */
-    #auth-screen {
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      gap: 16px;
-      background-color: #09090b;
-      z-index: 1000;
-    }
-    #auth-screen input[type="password"] {
-      padding: 12px 20px;
-      font-size: 18px;
-      border-radius: 6px;
-      border: 1px solid #3f3f46;
-      background: #18181b;
-      color: #fff;
-      text-align: center;
-      letter-spacing: 4px;
-      outline: none;
-    }
-
     /* 初期選択画面 */
     #mode-select {
       flex-direction: column;
@@ -53,6 +32,13 @@
       align-items: center;
       gap: 20px;
       background-color: #121214;
+      padding: 20px;
+      text-align: center;
+    }
+    #mode-select h1 {
+      font-size: clamp(20px, 5vw, 32px);
+      word-break: break-word;
+      max-width: 90vw;
     }
     .btn {
       background: #3b82f6;
@@ -63,7 +49,8 @@
       font-weight: bold;
       border-radius: 8px;
       cursor: pointer;
-      min-width: 240px;
+      width: 80vw;
+      max-width: 320px;
     }
     .btn-gray { background: #4b5563; }
     .btn-red { background: #ef4444; }
@@ -77,6 +64,9 @@
       gap: 12px;
       padding: 16px;
     }
+    #sender-screen h2 {
+      font-size: clamp(16px, 4vw, 24px);
+    }
     select {
       padding: 12px 24px;
       font-size: 16px;
@@ -84,17 +74,20 @@
       background: #27272a;
       color: #fff;
       border: 1px solid #3f3f46;
+      width: 80vw;
+      max-width: 320px;
     }
     #sender-preview-container {
       position: relative;
-      width: 80vw;
+      width: 90vw;
       height: 45vh;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
-    #sender-preview-container:-webkit-full-screen { width: 100vw; height: 100vh; }
-    #sender-preview-container:fullscreen { width: 100vw; height: 100vh; }
     #sender-video {
       width: 100%;
       height: 100%;
@@ -103,10 +96,20 @@
     .status-text {
       font-size: 14px;
       color: #60a5fa;
+      text-align: center;
     }
     .sender-btn-group {
       display: flex;
-      gap: 12px;
+      flex-direction: column;
+      gap: 10px;
+      width: 80vw;
+      max-width: 320px;
+    }
+    .sender-btn-group .btn {
+      width: 100%;
+      max-width: 100%;
+      padding: 12px;
+      font-size: 16px;
     }
 
     /* 受信機画面 */
@@ -139,7 +142,7 @@
     }
     .grid-view {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 16px;
       flex: 1;
       overflow-y: auto;
@@ -174,16 +177,9 @@
 </head>
 <body>
 
-  <!-- 0. パスワード画面 -->
-  <div id="auth-screen" class="screen active">
-    <h2>PASSWORD REQUIRED</h2>
-    <input type="password" id="pass-input" placeholder="パスワードを入力" maxlength="4">
-    <button class="btn" id="btn-auth">認証</button>
-  </div>
-
   <!-- 1. モード選択画面 -->
   <div id="mode-select" class="screen">
-    <h1>Multi-Camera-Live-Switcher-System</h1>
+    <h1>Multi-Camera<br>Live-Switcher-System</h1>
     <button class="btn" id="btn-to-sender">送信機として接続</button>
     <button class="btn btn-gray" id="btn-to-receiver">受信機として接続</button>
   </div>
@@ -216,17 +212,16 @@
     <div id="menu-overlay">
       <div class="menu-header">
         <h2>マルチビュー・メニュー</h2>
-        <button class="btn btn-red" id="btn-receiver-back">最初の画面に戻る</button>
+        <button class="btn btn-red" id="btn-receiver-back" style="width: auto;">最初の画面に戻る</button>
       </div>
       <div class="grid-view" id="grid-container"></div>
     </div>
   </div>
 
   <script>
-    const SYSTEM_PREFIX = "my-live-cam-system-";
+    const SYSTEM_PREFIX = "my-live-cam-system-v2-";
 
     const screens = {
-      auth: document.getElementById('auth-screen'),
       select: document.getElementById('mode-select'),
       sender: document.getElementById('sender-screen'),
       receiver: document.getElementById('receiver-screen')
@@ -237,21 +232,22 @@
       screens[key].classList.add('active');
     }
 
-    /* パスワード認証 */
-    document.getElementById('btn-auth').addEventListener('click', checkPassword);
-    document.getElementById('pass-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') checkPassword();
-    });
-
-    function checkPassword() {
-      const pass = document.getElementById('pass-input').value;
-      if (pass === "4750") {
-        showScreen('select');
-      } else {
-        alert("パスワードが違います");
-        document.getElementById('pass-input').value = "";
+    /* 起動時パスワード確認（ブラウザ標準ダイアログ） */
+    window.addEventListener('DOMContentLoaded', () => {
+      let auth = false;
+      while (!auth) {
+        const input = prompt("パスワードを入力してください");
+        if (input === "4750") {
+          auth = true;
+          showScreen('select');
+        } else if (input === null) {
+          // キャンセルを押した場合はリトライを促す
+          alert("パスワードが必要です");
+        } else {
+          alert("パスワードが違います");
+        }
       }
-    }
+    });
 
     document.getElementById('btn-to-sender').addEventListener('click', () => showScreen('sender'));
     document.getElementById('btn-to-receiver').addEventListener('click', () => {
@@ -270,10 +266,16 @@
       showScreen('select');
     });
 
-    /* 全画面表示ボタン処理 */
+    /* 全画面表示処理（スマホ最適化） */
     document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      const video = document.getElementById('sender-video');
       const container = document.getElementById('sender-preview-container');
-      if (container.requestFullscreen) {
+      
+      if (video.requestFullscreen) {
+        video.requestFullscreen();
+      } else if (video.webkitEnterFullscreen) { // iOS Safari対応
+        video.webkitEnterFullscreen();
+      } else if (container.requestFullscreen) {
         container.requestFullscreen();
       } else if (container.webkitRequestFullscreen) {
         container.webkitRequestFullscreen();
@@ -293,7 +295,7 @@
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false
         });
         document.getElementById('sender-video').srcObject = localStream;
@@ -303,10 +305,11 @@
 
         senderPeer = new Peer(peerId);
 
-        senderPeer.on('open', (id) => {
+        senderPeer.on('open', () => {
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機の接続を待っています)`;
         });
 
+        // 受信機からの接続（call）を待ち受け
         senderPeer.on('call', (call) => {
           call.answer(localStream);
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
@@ -316,7 +319,7 @@
           if (err.type === 'unavailable-id') {
             alert(`カメラ ${selectedNo} は既に使われています。別の番号を選択してください。`);
           } else {
-            alert("通信エラー: " + err.type);
+            console.error("Peer Error:", err);
           }
         });
 
@@ -344,7 +347,6 @@
     let receiverPeer = null;
     let currentCam = 1;
     const cameraStreams = {};
-    const activeCalls = {};
     const menuOverlay = document.getElementById('menu-overlay');
 
     function initReceiver() {
@@ -365,10 +367,15 @@
 
     function connectToCamera(num) {
       const targetPeerId = SYSTEM_PREFIX + num;
+      
+      // 空のCanvasからメディアストリームを出力して通話を開始
       const canvas = document.createElement('canvas');
+      canvas.width = 16; canvas.height = 16;
       const dummyStream = canvas.captureStream();
 
       const call = receiverPeer.call(targetPeerId, dummyStream);
+
+      if (!call) return;
 
       call.on('stream', (remoteStream) => {
         cameraStreams[num] = remoteStream;
@@ -378,7 +385,14 @@
         updateGridView();
       });
 
-      activeCalls[num] = call;
+      call.on('close', () => {
+        delete cameraStreams[num];
+        updateGridView();
+      });
+
+      call.on('error', () => {
+        delete cameraStreams[num];
+      });
     }
 
     function switchCamera(num) {
