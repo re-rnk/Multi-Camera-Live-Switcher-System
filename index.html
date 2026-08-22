@@ -219,7 +219,8 @@
   </div>
 
   <script>
-    const SYSTEM_PREFIX = "my-live-cam-system-v2-";
+    // 互換性担保のためのPrefix
+    const SYSTEM_PREFIX = "mcls-v4-";
 
     const screens = {
       select: document.getElementById('mode-select'),
@@ -232,7 +233,7 @@
       screens[key].classList.add('active');
     }
 
-    /* 起動時パスワード確認（ブラウザ標準ダイアログ） */
+    /* 起動時パスワード確認 */
     window.addEventListener('DOMContentLoaded', () => {
       let auth = false;
       while (!auth) {
@@ -241,7 +242,6 @@
           auth = true;
           showScreen('select');
         } else if (input === null) {
-          // キャンセルを押した場合はリトライを促す
           alert("パスワードが必要です");
         } else {
           alert("パスワードが違います");
@@ -266,14 +266,14 @@
       showScreen('select');
     });
 
-    /* 全画面表示処理（スマホ最適化） */
+    /* 全画面表示処理 */
     document.getElementById('btn-fullscreen').addEventListener('click', () => {
       const video = document.getElementById('sender-video');
       const container = document.getElementById('sender-preview-container');
       
       if (video.requestFullscreen) {
         video.requestFullscreen();
-      } else if (video.webkitEnterFullscreen) { // iOS Safari対応
+      } else if (video.webkitEnterFullscreen) {
         video.webkitEnterFullscreen();
       } else if (container.requestFullscreen) {
         container.requestFullscreen();
@@ -283,7 +283,7 @@
     });
 
     /* ===================================================
-       送信機（スマホ）側処理
+       送信機（スマホ）側処理：送信機固定ID型
     =================================================== */
     let localStream = null;
     let senderPeer = null;
@@ -295,31 +295,32 @@
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
         document.getElementById('sender-video').srcObject = localStream;
 
-        const peerId = SYSTEM_PREFIX + selectedNo;
+        // カメラ番号に応じた固定IDを作成（例: mcls-v4-cam-1）
+        const myPeerId = SYSTEM_PREFIX + "cam-" + selectedNo;
         if (senderPeer) senderPeer.destroy();
 
-        senderPeer = new Peer(peerId);
+        senderPeer = new Peer(myPeerId);
 
         senderPeer.on('open', () => {
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機の接続を待っています)`;
         });
 
-        // 受信機からの接続（call）を待ち受け
+        // 受信機からのコールを待ち受けてストリームを返す
         senderPeer.on('call', (call) => {
           call.answer(localStream);
-          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
+          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ接続完了)`;
         });
 
         senderPeer.on('error', (err) => {
           if (err.type === 'unavailable-id') {
-            alert(`カメラ ${selectedNo} は既に使われています。別の番号を選択してください。`);
+            alert(`カメラ ${selectedNo} はすでに起動しています。`);
           } else {
-            console.error("Peer Error:", err);
+            console.warn("Sender error:", err.type);
           }
         });
 
@@ -342,39 +343,49 @@
     }
 
     /* ===================================================
-       受信機（PC）側処理
+       受信機（PC）側処理：ポーリング自動検出型
     =================================================== */
     let receiverPeer = null;
     let currentCam = 1;
     const cameraStreams = {};
+    const activeCalls = {};
+    let pollingTimer = null;
     const menuOverlay = document.getElementById('menu-overlay');
 
     function initReceiver() {
       if (receiverPeer) receiverPeer.destroy();
       
+      // ランダムIDで起動
       receiverPeer = new Peer();
 
       receiverPeer.on('open', () => {
-        connectToAllCameras();
+        // 定期的に全カメラ（1〜4）へ接続を試みる（ループ処理）
+        startPollingCameras();
       });
     }
 
-    function connectToAllCameras() {
-      [1, 2, 3, 4].forEach(num => {
-        connectToCamera(num);
-      });
-    }
-
-    function connectToCamera(num) {
-      const targetPeerId = SYSTEM_PREFIX + num;
+    function startPollingCameras() {
+      if (pollingTimer) clearInterval(pollingTimer);
       
-      // 空のCanvasからメディアストリームを出力して通話を開始
+      // 2秒ごとに接続未完了のカメラへ再アプローチ
+      pollingTimer = setInterval(() => {
+        [1, 2, 3, 4].forEach(num => {
+          if (!cameraStreams[num]) {
+            connectToCam(num);
+          }
+        });
+      }, 2000);
+    }
+
+    function connectToCam(num) {
+      const targetId = SYSTEM_PREFIX + "cam-" + num;
+
+      // 受信機側からダミーキャンバスストリームを発信
       const canvas = document.createElement('canvas');
       canvas.width = 16; canvas.height = 16;
       const dummyStream = canvas.captureStream();
 
-      const call = receiverPeer.call(targetPeerId, dummyStream);
-
+      const call = receiverPeer.call(targetId, dummyStream);
       if (!call) return;
 
       call.on('stream', (remoteStream) => {
@@ -387,12 +398,15 @@
 
       call.on('close', () => {
         delete cameraStreams[num];
+        if (num === currentCam) switchCamera(num);
         updateGridView();
       });
 
       call.on('error', () => {
         delete cameraStreams[num];
       });
+
+      activeCalls[num] = call;
     }
 
     function switchCamera(num) {
@@ -403,11 +417,14 @@
         mainVideo.srcObject = cameraStreams[num];
       } else {
         mainVideo.srcObject = null;
-        connectToCamera(num);
       }
     }
 
     function stopReceiver() {
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
       if (receiverPeer) {
         receiverPeer.destroy();
         receiverPeer = null;
