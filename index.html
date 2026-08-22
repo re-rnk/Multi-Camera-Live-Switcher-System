@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multi-Camera-Live-Switcher-System</title>
-  <!-- PeerJSのライブラリを読み込み -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,6 +24,27 @@
       top: 0; left: 0;
     }
     .active { display: flex; }
+
+    /* パスワード認証画面 */
+    #auth-screen {
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      background-color: #09090b;
+      z-index: 1000;
+    }
+    #auth-screen input[type="password"] {
+      padding: 12px 20px;
+      font-size: 18px;
+      border-radius: 6px;
+      border: 1px solid #3f3f46;
+      background: #18181b;
+      color: #fff;
+      text-align: center;
+      letter-spacing: 4px;
+      outline: none;
+    }
 
     /* 初期選択画面 */
     #mode-select {
@@ -54,7 +74,8 @@
       justify-content: center;
       align-items: center;
       background: #1a1a1e;
-      gap: 16px;
+      gap: 12px;
+      padding: 16px;
     }
     select {
       padding: 12px 24px;
@@ -67,11 +88,13 @@
     #sender-preview-container {
       position: relative;
       width: 80vw;
-      height: 50vh;
+      height: 45vh;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
     }
+    #sender-preview-container:-webkit-full-screen { width: 100vw; height: 100vh; }
+    #sender-preview-container:fullscreen { width: 100vw; height: 100vh; }
     #sender-video {
       width: 100%;
       height: 100%;
@@ -80,6 +103,10 @@
     .status-text {
       font-size: 14px;
       color: #60a5fa;
+    }
+    .sender-btn-group {
+      display: flex;
+      gap: 12px;
     }
 
     /* 受信機画面 */
@@ -91,17 +118,6 @@
       width: 100vw;
       height: 100vh;
       object-fit: cover;
-    }
-    .camera-tag {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      background: rgba(0,0,0,0.6);
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-size: 20px;
-      font-weight: bold;
-      border-left: 4px solid #3b82f6;
     }
 
     /* ESCメニュー・マルチビュー画面 */
@@ -158,9 +174,16 @@
 </head>
 <body>
 
+  <!-- 0. パスワード画面 -->
+  <div id="auth-screen" class="screen active">
+    <h2>PASSWORD REQUIRED</h2>
+    <input type="password" id="pass-input" placeholder="パスワードを入力" maxlength="4">
+    <button class="btn" id="btn-auth">認証</button>
+  </div>
+
   <!-- 1. モード選択画面 -->
-  <div id="mode-select" class="screen active">
-    <h1>カメラ伝送システム</h1>
+  <div id="mode-select" class="screen">
+    <h1>Multi-Camera-Live-Switcher-System</h1>
     <button class="btn" id="btn-to-sender">送信機として接続</button>
     <button class="btn btn-gray" id="btn-to-receiver">受信機として接続</button>
   </div>
@@ -179,13 +202,15 @@
     <div id="sender-preview-container">
       <video id="sender-video" autoplay playsinline muted></video>
     </div>
-    <button class="btn btn-red" id="btn-sender-back">最初の画面に戻る</button>
+    <div class="sender-btn-group">
+      <button class="btn btn-gray" id="btn-fullscreen">全画面表示</button>
+      <button class="btn btn-red" id="btn-sender-back">最初の画面に戻る</button>
+    </div>
   </div>
 
   <!-- 3. 受信機画面 -->
   <div id="receiver-screen" class="screen">
     <video id="main-video" autoplay playsinline></video>
-    <div class="camera-tag" id="current-cam-tag">CAMERA 1 (接続待機中...)</div>
 
     <!-- ESCキーメニュー / マルチビュー -->
     <div id="menu-overlay">
@@ -198,10 +223,10 @@
   </div>
 
   <script>
-    // IDの共通プレフィックス（他人の接続と被らないための識別子）
     const SYSTEM_PREFIX = "my-live-cam-system-";
 
     const screens = {
+      auth: document.getElementById('auth-screen'),
       select: document.getElementById('mode-select'),
       sender: document.getElementById('sender-screen'),
       receiver: document.getElementById('receiver-screen')
@@ -210,6 +235,22 @@
     function showScreen(key) {
       Object.values(screens).forEach(s => s.classList.remove('active'));
       screens[key].classList.add('active');
+    }
+
+    /* パスワード認証 */
+    document.getElementById('btn-auth').addEventListener('click', checkPassword);
+    document.getElementById('pass-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') checkPassword();
+    });
+
+    function checkPassword() {
+      const pass = document.getElementById('pass-input').value;
+      if (pass === "4750") {
+        showScreen('select');
+      } else {
+        alert("パスワードが違います");
+        document.getElementById('pass-input').value = "";
+      }
     }
 
     document.getElementById('btn-to-sender').addEventListener('click', () => showScreen('sender'));
@@ -229,6 +270,16 @@
       showScreen('select');
     });
 
+    /* 全画面表示ボタン処理 */
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      const container = document.getElementById('sender-preview-container');
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
+      } else if (container.webkitRequestFullscreen) {
+        container.webkitRequestFullscreen();
+      }
+    });
+
     /* ===================================================
        送信機（スマホ）側処理
     =================================================== */
@@ -241,14 +292,12 @@
       statusEl.textContent = "カメラ起動中...";
 
       try {
-        // カメラ映像の取得
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
           audio: false
         });
         document.getElementById('sender-video').srcObject = localStream;
 
-        // PeerJSの接続開始（ID: my-live-cam-system-1 など）
         const peerId = SYSTEM_PREFIX + selectedNo;
         if (senderPeer) senderPeer.destroy();
 
@@ -258,7 +307,6 @@
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機の接続を待っています)`;
         });
 
-        // 受信機からの発信（Call）を検知したら映像ストリームを返す
         senderPeer.on('call', (call) => {
           call.answer(localStream);
           statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
@@ -295,22 +343,20 @@
     =================================================== */
     let receiverPeer = null;
     let currentCam = 1;
-    const cameraStreams = {}; // 各カメラのStreamを保持するオブジェクト { 1: stream, 2: stream }
+    const cameraStreams = {};
     const activeCalls = {};
     const menuOverlay = document.getElementById('menu-overlay');
 
     function initReceiver() {
       if (receiverPeer) receiverPeer.destroy();
       
-      receiverPeer = new Peer(); // ランダムIDで起動
+      receiverPeer = new Peer();
 
       receiverPeer.on('open', () => {
-        // カメラ1〜4へ一斉に接続を試みる
         connectToAllCameras();
       });
     }
 
-    // 全てのカメラ（1〜4）へコールを発射
     function connectToAllCameras() {
       [1, 2, 3, 4].forEach(num => {
         connectToCamera(num);
@@ -319,7 +365,6 @@
 
     function connectToCamera(num) {
       const targetPeerId = SYSTEM_PREFIX + num;
-      // ダミーのメディアストリームを生成してコール（PeerJSの仕様対策）
       const canvas = document.createElement('canvas');
       const dummyStream = canvas.captureStream();
 
@@ -339,15 +384,11 @@
     function switchCamera(num) {
       currentCam = num;
       const mainVideo = document.getElementById('main-video');
-      const tag = document.getElementById('current-cam-tag');
 
       if (cameraStreams[num]) {
         mainVideo.srcObject = cameraStreams[num];
-        tag.textContent = `CAMERA ${num}`;
       } else {
         mainVideo.srcObject = null;
-        tag.textContent = `CAMERA ${num} (未接続 - 再接続試行中...)`;
-        // まだ接続できていない場合は再試行
         connectToCamera(num);
       }
     }
@@ -360,7 +401,6 @@
       Object.keys(cameraStreams).forEach(key => delete cameraStreams[key]);
     }
 
-    // キーボード操作（数字キーでカメラ切替、ESCでメニュー）
     window.addEventListener('keydown', (e) => {
       if (!screens.receiver.classList.contains('active')) return;
 
