@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>マルチカメラ ライブスイッチャー System</title>
+  <title>Multi-Camera-Live-Switcher-System</title>
+  <!-- PeerJSのライブラリを読み込み -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -65,7 +67,7 @@
     #sender-preview-container {
       position: relative;
       width: 80vw;
-      height: 60vh;
+      height: 50vh;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
@@ -74,6 +76,10 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+    .status-text {
+      font-size: 14px;
+      color: #60a5fa;
     }
 
     /* 受信機画面 */
@@ -169,16 +175,17 @@
       <option value="4">カメラ 4</option>
     </select>
     <button class="btn" id="btn-start-camera">カメラ起動・配信開始</button>
+    <div class="status-text" id="sender-status"></div>
     <div id="sender-preview-container">
       <video id="sender-video" autoplay playsinline muted></video>
     </div>
     <button class="btn btn-red" id="btn-sender-back">最初の画面に戻る</button>
   </div>
 
-  <!-- 3. 受信機画面（スイッチング画面） -->
+  <!-- 3. 受信機画面 -->
   <div id="receiver-screen" class="screen">
     <video id="main-video" autoplay playsinline></video>
-    <div class="camera-tag" id="current-cam-tag">CAMERA 1</div>
+    <div class="camera-tag" id="current-cam-tag">CAMERA 1 (接続待機中...)</div>
 
     <!-- ESCキーメニュー / マルチビュー -->
     <div id="menu-overlay">
@@ -186,14 +193,14 @@
         <h2>マルチビュー・メニュー</h2>
         <button class="btn btn-red" id="btn-receiver-back">最初の画面に戻る</button>
       </div>
-      <div class="grid-view" id="grid-container">
-        <!-- 接続されているカメラ映像がグリッドで並ぶ -->
-      </div>
+      <div class="grid-view" id="grid-container"></div>
     </div>
   </div>
 
   <script>
-    // 画面切り替え制御
+    // IDの共通プレフィックス（他人の接続と被らないための識別子）
+    const SYSTEM_PREFIX = "my-live-cam-system-";
+
     const screens = {
       select: document.getElementById('mode-select'),
       sender: document.getElementById('sender-screen'),
@@ -205,7 +212,6 @@
       screens[key].classList.add('active');
     }
 
-    // 各ボタンのイベント
     document.getElementById('btn-to-sender').addEventListener('click', () => showScreen('sender'));
     document.getElementById('btn-to-receiver').addEventListener('click', () => {
       showScreen('receiver');
@@ -213,65 +219,155 @@
     });
 
     document.getElementById('btn-sender-back').addEventListener('click', () => {
-      stopSenderCamera();
+      stopSender();
       showScreen('select');
     });
 
     document.getElementById('btn-receiver-back').addEventListener('click', () => {
+      stopReceiver();
       document.getElementById('menu-overlay').style.display = 'none';
       showScreen('select');
     });
 
-    /* --- 送信機（カメラ）処理 --- */
+    /* ===================================================
+       送信機（スマホ）側処理
+    =================================================== */
     let localStream = null;
+    let senderPeer = null;
 
     document.getElementById('btn-start-camera').addEventListener('click', async () => {
       const selectedNo = document.getElementById('camera-number').value;
+      const statusEl = document.getElementById('sender-status');
+      statusEl.textContent = "カメラ起動中...";
+
       try {
+        // カメラ映像の取得
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
           audio: false
         });
         document.getElementById('sender-video').srcObject = localStream;
-        
-        // TODO: ここでWebRTC/BroadcastChannelを用いて「selectedNo」のIDで映像ソケットを開く
-        alert(`カメラ ${selectedNo} として配信を開始しました`);
+
+        // PeerJSの接続開始（ID: my-live-cam-system-1 など）
+        const peerId = SYSTEM_PREFIX + selectedNo;
+        if (senderPeer) senderPeer.destroy();
+
+        senderPeer = new Peer(peerId);
+
+        senderPeer.on('open', (id) => {
+          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機の接続を待っています)`;
+        });
+
+        // 受信機からの発信（Call）を検知したら映像ストリームを返す
+        senderPeer.on('call', (call) => {
+          call.answer(localStream);
+          statusEl.textContent = `配信中: カメラ ${selectedNo} (受信機へ映像送信中)`;
+        });
+
+        senderPeer.on('error', (err) => {
+          if (err.type === 'unavailable-id') {
+            alert(`カメラ ${selectedNo} は既に使われています。別の番号を選択してください。`);
+          } else {
+            alert("通信エラー: " + err.type);
+          }
+        });
+
       } catch (err) {
         alert("カメラの起動に失敗しました: " + err.message);
+        statusEl.textContent = "";
       }
     });
 
-    function stopSenderCamera() {
+    function stopSender() {
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
       }
+      if (senderPeer) {
+        senderPeer.destroy();
+        senderPeer = null;
+      }
+      document.getElementById('sender-status').textContent = "";
     }
 
-    /* --- 受信機（スイッチャー）処理 --- */
+    /* ===================================================
+       受信機（PC）側処理
+    =================================================== */
+    let receiverPeer = null;
     let currentCam = 1;
+    const cameraStreams = {}; // 各カメラのStreamを保持するオブジェクト { 1: stream, 2: stream }
+    const activeCalls = {};
     const menuOverlay = document.getElementById('menu-overlay');
 
     function initReceiver() {
-      switchCamera(1);
+      if (receiverPeer) receiverPeer.destroy();
+      
+      receiverPeer = new Peer(); // ランダムIDで起動
+
+      receiverPeer.on('open', () => {
+        // カメラ1〜4へ一斉に接続を試みる
+        connectToAllCameras();
+      });
+    }
+
+    // 全てのカメラ（1〜4）へコールを発射
+    function connectToAllCameras() {
+      [1, 2, 3, 4].forEach(num => {
+        connectToCamera(num);
+      });
+    }
+
+    function connectToCamera(num) {
+      const targetPeerId = SYSTEM_PREFIX + num;
+      // ダミーのメディアストリームを生成してコール（PeerJSの仕様対策）
+      const canvas = document.createElement('canvas');
+      const dummyStream = canvas.captureStream();
+
+      const call = receiverPeer.call(targetPeerId, dummyStream);
+
+      call.on('stream', (remoteStream) => {
+        cameraStreams[num] = remoteStream;
+        if (num === currentCam) {
+          switchCamera(num);
+        }
+        updateGridView();
+      });
+
+      activeCalls[num] = call;
     }
 
     function switchCamera(num) {
       currentCam = num;
-      document.getElementById('current-cam-tag').textContent = `CAMERA ${num}`;
-      // TODO: 指定されたカメラ番号(num)のStreamを main-video にアタッチする処理
+      const mainVideo = document.getElementById('main-video');
+      const tag = document.getElementById('current-cam-tag');
+
+      if (cameraStreams[num]) {
+        mainVideo.srcObject = cameraStreams[num];
+        tag.textContent = `CAMERA ${num}`;
+      } else {
+        mainVideo.srcObject = null;
+        tag.textContent = `CAMERA ${num} (未接続 - 再接続試行中...)`;
+        // まだ接続できていない場合は再試行
+        connectToCamera(num);
+      }
+    }
+
+    function stopReceiver() {
+      if (receiverPeer) {
+        receiverPeer.destroy();
+        receiverPeer = null;
+      }
+      Object.keys(cameraStreams).forEach(key => delete cameraStreams[key]);
     }
 
     // キーボード操作（数字キーでカメラ切替、ESCでメニュー）
     window.addEventListener('keydown', (e) => {
       if (!screens.receiver.classList.contains('active')) return;
 
-      // 1〜9 キーでの切り替え
-      if (e.key >= '1' && e.key <= '9') {
+      if (e.key >= '1' && e.key <= '4') {
         switchCamera(parseInt(e.key, 10));
       }
 
-      // ESC キーでメニュー開閉
       if (e.key === 'Escape') {
         const isMenuOpen = menuOverlay.style.display === 'flex';
         menuOverlay.style.display = isMenuOpen ? 'none' : 'flex';
@@ -285,18 +381,31 @@
       const container = document.getElementById('grid-container');
       container.innerHTML = '';
 
-      // 例として1〜4のマルチビュー枠を生成
       for (let i = 1; i <= 4; i++) {
         const item = document.createElement('div');
         item.className = `grid-item ${i === currentCam ? 'active-cam' : ''}`;
-        item.innerHTML = `
-          <video autoplay playsinline muted></video>
-          <div class="label">カメラ ${i}</div>
-        `;
+        
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsinline = true;
+        video.muted = true;
+
+        if (cameraStreams[i]) {
+          video.srcObject = cameraStreams[i];
+        }
+
+        item.appendChild(video);
+
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = `カメラ ${i} ${cameraStreams[i] ? '' : '(未接続)'}`;
+        item.appendChild(label);
+
         item.addEventListener('click', () => {
           switchCamera(i);
           menuOverlay.style.display = 'none';
         });
+
         container.appendChild(item);
       }
     }
