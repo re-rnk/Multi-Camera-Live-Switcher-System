@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マルチカメラ ライブスイッチャー System</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #000;
+      color: #fff;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    
+    .screen {
+      display: none;
+      width: 100vw;
+      height: 100vh;
+      position: absolute;
+      top: 0; left: 0;
+    }
+    .active { display: flex; }
+
+    /* 初期選択画面 */
+    #mode-select {
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      background-color: #121214;
+    }
+    .btn {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      min-width: 240px;
+    }
+    .btn-gray { background: #4b5563; }
+    .btn-red { background: #ef4444; }
+
+    /* 送信機画面 */
+    #sender-screen {
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a1e;
+      gap: 16px;
+    }
+    select {
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 6px;
+      background: #27272a;
+      color: #fff;
+      border: 1px solid #3f3f46;
+    }
+    #sender-preview-container {
+      position: relative;
+      width: 80vw;
+      height: 60vh;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #sender-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* 受信機画面 */
+    #receiver-screen {
+      position: relative;
+      background: #000;
+    }
+    #main-video {
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+    .camera-tag {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 20px;
+      font-weight: bold;
+      border-left: 4px solid #3b82f6;
+    }
+
+    /* ESCメニュー・マルチビュー画面 */
+    #menu-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.85);
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      padding: 24px;
+      gap: 20px;
+    }
+    .menu-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .grid-view {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .grid-item {
+      position: relative;
+      background: #18181b;
+      border-radius: 6px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .grid-item.active-cam {
+      border-color: #3b82f6;
+    }
+    .grid-item video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .grid-item .label {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.7);
+      padding: 4px 8px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. モード選択画面 -->
+  <div id="mode-select" class="screen active">
+    <h1>カメラ伝送システム</h1>
+    <button class="btn" id="btn-to-sender">送信機として接続</button>
+    <button class="btn btn-gray" id="btn-to-receiver">受信機として接続</button>
+  </div>
+
+  <!-- 2. 送信機画面 -->
+  <div id="sender-screen" class="screen">
+    <h2>カメラ番号を選択してください</h2>
+    <select id="camera-number">
+      <option value="1">カメラ 1</option>
+      <option value="2">カメラ 2</option>
+      <option value="3">カメラ 3</option>
+      <option value="4">カメラ 4</option>
+    </select>
+    <button class="btn" id="btn-start-camera">カメラ起動・配信開始</button>
+    <div id="sender-preview-container">
+      <video id="sender-video" autoplay playsinline muted></video>
+    </div>
+    <button class="btn btn-red" id="btn-sender-back">最初の画面に戻る</button>
+  </div>
+
+  <!-- 3. 受信機画面（スイッチング画面） -->
+  <div id="receiver-screen" class="screen">
+    <video id="main-video" autoplay playsinline></video>
+    <div class="camera-tag" id="current-cam-tag">CAMERA 1</div>
+
+    <!-- ESCキーメニュー / マルチビュー -->
+    <div id="menu-overlay">
+      <div class="menu-header">
+        <h2>マルチビュー・メニュー</h2>
+        <button class="btn btn-red" id="btn-receiver-back">最初の画面に戻る</button>
+      </div>
+      <div class="grid-view" id="grid-container">
+        <!-- 接続されているカメラ映像がグリッドで並ぶ -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 画面切り替え制御
+    const screens = {
+      select: document.getElementById('mode-select'),
+      sender: document.getElementById('sender-screen'),
+      receiver: document.getElementById('receiver-screen')
+    };
+
+    function showScreen(key) {
+      Object.values(screens).forEach(s => s.classList.remove('active'));
+      screens[key].classList.add('active');
+    }
+
+    // 各ボタンのイベント
+    document.getElementById('btn-to-sender').addEventListener('click', () => showScreen('sender'));
+    document.getElementById('btn-to-receiver').addEventListener('click', () => {
+      showScreen('receiver');
+      initReceiver();
+    });
+
+    document.getElementById('btn-sender-back').addEventListener('click', () => {
+      stopSenderCamera();
+      showScreen('select');
+    });
+
+    document.getElementById('btn-receiver-back').addEventListener('click', () => {
+      document.getElementById('menu-overlay').style.display = 'none';
+      showScreen('select');
+    });
+
+    /* --- 送信機（カメラ）処理 --- */
+    let localStream = null;
+
+    document.getElementById('btn-start-camera').addEventListener('click', async () => {
+      const selectedNo = document.getElementById('camera-number').value;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false
+        });
+        document.getElementById('sender-video').srcObject = localStream;
+        
+        // TODO: ここでWebRTC/BroadcastChannelを用いて「selectedNo」のIDで映像ソケットを開く
+        alert(`カメラ ${selectedNo} として配信を開始しました`);
+      } catch (err) {
+        alert("カメラの起動に失敗しました: " + err.message);
+      }
+    });
+
+    function stopSenderCamera() {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+    }
+
+    /* --- 受信機（スイッチャー）処理 --- */
+    let currentCam = 1;
+    const menuOverlay = document.getElementById('menu-overlay');
+
+    function initReceiver() {
+      switchCamera(1);
+    }
+
+    function switchCamera(num) {
+      currentCam = num;
+      document.getElementById('current-cam-tag').textContent = `CAMERA ${num}`;
+      // TODO: 指定されたカメラ番号(num)のStreamを main-video にアタッチする処理
+    }
+
+    // キーボード操作（数字キーでカメラ切替、ESCでメニュー）
+    window.addEventListener('keydown', (e) => {
+      if (!screens.receiver.classList.contains('active')) return;
+
+      // 1〜9 キーでの切り替え
+      if (e.key >= '1' && e.key <= '9') {
+        switchCamera(parseInt(e.key, 10));
+      }
+
+      // ESC キーでメニュー開閉
+      if (e.key === 'Escape') {
+        const isMenuOpen = menuOverlay.style.display === 'flex';
+        menuOverlay.style.display = isMenuOpen ? 'none' : 'flex';
+        if (!isMenuOpen) {
+          updateGridView();
+        }
+      }
+    });
+
+    function updateGridView() {
+      const container = document.getElementById('grid-container');
+      container.innerHTML = '';
+
+      // 例として1〜4のマルチビュー枠を生成
+      for (let i = 1; i <= 4; i++) {
+        const item = document.createElement('div');
+        item.className = `grid-item ${i === currentCam ? 'active-cam' : ''}`;
+        item.innerHTML = `
+          <video autoplay playsinline muted></video>
+          <div class="label">カメラ ${i}</div>
+        `;
+        item.addEventListener('click', () => {
+          switchCamera(i);
+          menuOverlay.style.display = 'none';
+        });
+        container.appendChild(item);
+      }
+    }
+  </script>
+</body>
+</html>
